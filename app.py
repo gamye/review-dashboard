@@ -13,10 +13,9 @@ import altair as alt
 # 1. 초기 설정 및 데이터 불러오기
 # --------------------------------------------------------------------------
 
-# 페이지를 넓게 사용하도록 설정
 st.set_page_config(layout="wide")
 
-@st.cache_data # 데이터 불러오기는 한번만 실행하도록 저장(캐싱)
+@st.cache_data
 def load_data(file_path):
     """CSV 파일을 불러오고 기본 처리를 수행합니다."""
     try:
@@ -25,27 +24,23 @@ def load_data(file_path):
         st.error(f"오류: '{file_path}' 파일을 찾을 수 없습니다. 파일이 현재 폴더에 있는지 확인해주세요.")
         return None
     
-    # '리뷰작성일시' 열을 '작성일'로 이름 변경
     if '리뷰작성일시' in df.columns:
         df.rename(columns={'리뷰작성일시': '작성일'}, inplace=True)
     else:
         st.error("오류: 날짜 정보를 담고 있는 '리뷰작성일시' 열을 찾을 수 없습니다.")
         return None
 
-    # 날짜 형식으로 변환하고 년/월/연월 열 생성
     df['작성일'] = pd.to_datetime(df['작성일'])
     df['년'] = df['작성일'].dt.year
     df['월'] = df['작성일'].dt.month
     df['연월'] = df['작성일'].dt.strftime('%Y-%m')
     
-    # '리뷰평점' 열을 '평점'으로 이름 변경
     if '리뷰평점' in df.columns:
         df.rename(columns={'리뷰평점': '평점'}, inplace=True)
     else:
         st.error("오류: '리뷰평점' 열을 찾을 수 없습니다.")
         return None
 
-    # 리뷰 내용 처리
     df['리뷰내용'] = df['리뷰내용'].fillna('')
     df['리뷰내용_전처리'] = df['리뷰내용'].apply(preprocess_text)
     
@@ -60,7 +55,6 @@ def preprocess_text(text):
     return text
 
 def get_korean_font_path():
-    """운영체제에 맞는 한글 글꼴 경로를 반환합니다."""
     import os
     if platform.system() == 'Windows':
         return 'c:/Windows/Fonts/malgun.ttf'
@@ -76,33 +70,23 @@ def get_korean_font_path():
 
 FONT_PATH = get_korean_font_path()
 
-# --- [수정된 부분 시작] ---
-# Matplotlib의 전역 글꼴 설정
 if FONT_PATH:
-    # matplotlib에 나눔고딕 글꼴을 직접 등록
-    # 이 부분이 리눅스(Streamlit Cloud) 환경에서 제목이 깨지는 것을 방지합니다.
     import matplotlib.font_manager as fm
     if not any(f.name == 'NanumGothic' for f in fm.fontManager.ttflist):
         fm.fontManager.addfont(FONT_PATH)
-    
-    # 기본 글꼴을 나눔고딕으로 설정
     plt.rc('font', family='NanumGothic')
     
-# 윈도우나 맥 환경에서는 각 운영체제에 맞는 글꼴 이름으로 재설정 (로컬 테스트용)
 if platform.system() == 'Windows':
     plt.rc('font', family='Malgun Gothic')
 elif platform.system() == 'Darwin':
     plt.rc('font', family='AppleGothic')
     
-# 마이너스 기호가 깨지는 것을 방지
 plt.rcParams['axes.unicode_minus'] = False
-# --- [수정된 부분 끝] ---
-
 
 # --------------------------------------------------------------------------
 # 2. 분석 및 화면 표시용 함수
 # --------------------------------------------------------------------------
-@st.cache_resource # 형태소 분석기는 무거우므로 한번만 생성하도록 저장
+@st.cache_resource
 def get_okt():
     return Okt()
 
@@ -127,7 +111,6 @@ def display_wordcloud(keyword_counts, title):
     if not keyword_counts:
         st.info(f"'{title}'에 대한 자료가 없어 구름 그림을 표시할 수 없습니다.")
         return
-    # font_path는 WordCloud 생성 시 계속 지정해주어야 함
     wc = WordCloud(font_path=FONT_PATH, background_color='white', width=400, height=250, colormap='viridis').generate_from_frequencies(dict(keyword_counts))
     fig, ax = plt.subplots()
     ax.imshow(wc, interpolation='bilinear')
@@ -141,20 +124,41 @@ def display_wordcloud(keyword_counts, title):
 
 st.title('📈 리뷰 데이터 분석 대시보드')
 
-# --- 데이터 불러오기 ---
 df_origin = load_data('240611-250611_Quick_Review_Filter.csv')
 
 if df_origin is not None:
-    # --- 옆쪽 메뉴 (사이드바) ---
-    st.sidebar.header('🗓️ 필터')
+    # --- [수정됨] 옆쪽 메뉴 (사이드바) 구성 변경 ---
+    st.sidebar.header('🗓️ 기간 필터')
     
-    # 연도 선택
     year_list = sorted(df_origin['년'].unique(), reverse=True)
     selected_year = st.sidebar.selectbox('연도 선택', year_list)
 
-    # 월 선택
     month_list = ['전체'] + sorted(df_origin[df_origin['년'] == selected_year]['월'].unique())
     selected_month = st.sidebar.selectbox('월 선택', month_list)
+
+    st.sidebar.divider()
+    st.sidebar.header('⚙️ 분석 기준 설정')
+    
+    # 1. m값 자동 계산 (전체 데이터의 리뷰 개수 중앙값)
+    review_counts_per_product = df_origin.groupby('상품명')['상품명'].count()
+    # 데이터가 하나도 없을 경우를 대비해 예외 처리
+    if not review_counts_per_product.empty:
+        m_default = int(review_counts_per_product.median())
+        max_reviews = int(review_counts_per_product.max())
+    else:
+        m_default = 10 # 기본값
+        max_reviews = 100 # 기본값
+    
+    # 2. 최소 리뷰 개수 슬라이더
+    min_review_count = st.sidebar.slider(
+        '최소 리뷰 개수 필터', 
+        min_value=0, 
+        max_value=max_reviews, 
+        value=0, # 기본값은 0으로 설정하여 모든 상품을 보여줌
+        step=1
+    )
+    st.sidebar.info(f"💡 '신뢰도 점수' 계산 시 사용된 가중치(m)의 기본값은 리뷰 개수의 중앙값인 **{m_default}개**입니다.")
+
 
     # --- 데이터 선택하기 ---
     df_year_filtered = df_origin[df_origin['년'] == selected_year]
@@ -183,22 +187,42 @@ if df_origin is not None:
     if not df_filtered.empty:
         st.header(f'📊 {selected_year}년 {selected_month if selected_month != "전체" else "전체"}월 분석')
 
-        # --- 2. 상품별 자료 및 3. 상품별 리뷰 원문 분석 ---
+        # --- [수정됨] 2. 상품별 상세 분석 (신뢰도 점수 적용) ---
         st.subheader('📦 상품별 상세 분석')
+
+        # 선택된 기간의 전체 평균 평점 (C값)
+        C = df_filtered['평점'].mean()
+        m = m_default # m값은 중앙값으로 설정
 
         rating_df = df_filtered.groupby('상품명').agg(
             평균평점=('평점', 'mean'),
             리뷰수=('평점', 'count')
-        ).reset_index().sort_values(by='평균평점', ascending=True)
+        ).reset_index()
 
+        # 신뢰도 점수 계산
+        v = rating_df['리뷰수']
+        R = rating_df['평균평점']
+        rating_df['신뢰도점수'] = (v / (v + m)) * R + (m / (v + m)) * C
+        
+        # 최소 리뷰 개수 필터 적용
+        rating_df_filtered = rating_df[rating_df['리뷰수'] >= min_review_count]
+
+        # 신뢰도 점수가 낮은 순으로 정렬
+        rating_df_sorted = rating_df_filtered.sort_values(by='신뢰도점수', ascending=True)
+
+        # 화면에 표시할 열 순서 재배치
+        display_cols = ['상품명', '리뷰수', '평균평점', '신뢰도점수']
         st.dataframe(
-            rating_df.style.background_gradient(cmap='Reds_r', subset=['평균평점']).format({'평균평점': '{:.2f}'}),
+            rating_df_sorted[display_cols].style
+            .background_gradient(cmap='Reds_r', subset=['평균평점', '신뢰도점수'])
+            .format({'평균평점': '{:.2f}', '신뢰도점수': '{:.2f}'}),
             use_container_width=True
         )
-
+        
         st.markdown("---")
         st.markdown("####  특정 상품 리뷰 원문 보기 (핵심어 강조)")
-        product_list = ["상품을 선택하세요"] + rating_df['상품명'].tolist()
+        # 필터링된 상품 목록을 드롭다운에 사용
+        product_list = ["상품을 선택하세요"] + rating_df_sorted['상품명'].tolist()
         selected_product = st.selectbox('상품을 선택하면 해당 상품의 리뷰 원문을 보여줍니다.', product_list)
 
         if selected_product != "상품을 선택하세요":
