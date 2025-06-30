@@ -67,17 +67,36 @@ def get_korean_font_path():
     elif platform.system() == 'Darwin':
         return '/System/Library/Fonts/Supplemental/AppleGothic.ttf'
     else: # 리눅스 (Streamlit Cloud)
-        # 나눔고딕이 설치되어 있는지 확인 후 경로 반환
         nanum_font_path = '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
         if os.path.exists(nanum_font_path):
             return nanum_font_path
         else:
-            # 만약 나눔고딕이 없으면, 기본 글꼴을 사용하도록 None을 반환
-            # 이 경우 워드클라우드에 한글이 깨질 수 있으나, 앱 실행은 됨
             st.warning("나눔고딕 글꼴을 찾을 수 없어 기본 글꼴로 표시됩니다. (한글 깨짐 가능성)")
             return None
 
 FONT_PATH = get_korean_font_path()
+
+# --- [수정된 부분 시작] ---
+# Matplotlib의 전역 글꼴 설정
+if FONT_PATH:
+    # matplotlib에 나눔고딕 글꼴을 직접 등록
+    # 이 부분이 리눅스(Streamlit Cloud) 환경에서 제목이 깨지는 것을 방지합니다.
+    import matplotlib.font_manager as fm
+    if not any(f.name == 'NanumGothic' for f in fm.fontManager.ttflist):
+        fm.fontManager.addfont(FONT_PATH)
+    
+    # 기본 글꼴을 나눔고딕으로 설정
+    plt.rc('font', family='NanumGothic')
+    
+# 윈도우나 맥 환경에서는 각 운영체제에 맞는 글꼴 이름으로 재설정 (로컬 테스트용)
+if platform.system() == 'Windows':
+    plt.rc('font', family='Malgun Gothic')
+elif platform.system() == 'Darwin':
+    plt.rc('font', family='AppleGothic')
+    
+# 마이너스 기호가 깨지는 것을 방지
+plt.rcParams['axes.unicode_minus'] = False
+# --- [수정된 부분 끝] ---
 
 
 # --------------------------------------------------------------------------
@@ -108,6 +127,7 @@ def display_wordcloud(keyword_counts, title):
     if not keyword_counts:
         st.info(f"'{title}'에 대한 자료가 없어 구름 그림을 표시할 수 없습니다.")
         return
+    # font_path는 WordCloud 생성 시 계속 지정해주어야 함
     wc = WordCloud(font_path=FONT_PATH, background_color='white', width=400, height=250, colormap='viridis').generate_from_frequencies(dict(keyword_counts))
     fig, ax = plt.subplots()
     ax.imshow(wc, interpolation='bilinear')
@@ -177,22 +197,17 @@ if df_origin is not None:
         )
 
         st.markdown("---")
-        # [수정됨] 기능 명칭을 '리뷰 원문 보기'로 변경
         st.markdown("####  특정 상품 리뷰 원문 보기 (핵심어 강조)")
         product_list = ["상품을 선택하세요"] + rating_df['상품명'].tolist()
         selected_product = st.selectbox('상품을 선택하면 해당 상품의 리뷰 원문을 보여줍니다.', product_list)
 
-        # --- [대대적 수정 부분 시작] ---
         if selected_product != "상품을 선택하세요":
-            # 1. 선택된 상품의 리뷰만 추출
             product_reviews = df_filtered[df_filtered['상품명'] == selected_product].copy()
             
-            # 2. 선택된 상품의 평균 평점과 리뷰 개수 표시
             avg_rating = product_reviews['평점'].mean()
             review_count = len(product_reviews)
             st.metric(label=f"'{selected_product}' 평균 평점", value=f"{avg_rating:.2f} 점", delta=f"리뷰 {review_count}개")
 
-            # 3. 해당 상품의 TOP 5 핵심어 찾기 (강조 표시용)
             product_keywords_list = get_keywords(product_reviews['리뷰내용_전처리'])
 
             if product_keywords_list:
@@ -200,27 +215,20 @@ if df_origin is not None:
                 top_keywords = [kw for kw, count in product_keyword_counts.most_common(5)]
                 st.info(f"💡 이 상품의 주요 핵심어: **{', '.join(top_keywords)}** (리뷰 내용에서 빨간색으로 강조됩니다)")
 
-                # 4. 리뷰 내용에서 핵심어를 찾아 빨간색으로 강조하는 함수
                 def highlight_keywords(text, keywords):
                     for keyword in keywords:
                         text = re.sub(f'({re.escape(keyword)})', r'<span style="color: red; font-weight: bold;">\1</span>', text)
                     return text
 
-                # 5. 화면에 표시할 표 만들기 (평점 낮은 순 정렬)
                 display_df = product_reviews[['평점', '리뷰내용']].sort_values(by='평점', ascending=True)
-                # '리뷰내용' 열에 하이라이트 함수 적용
                 display_df['리뷰내용'] = display_df['리뷰내용'].apply(lambda x: highlight_keywords(x, top_keywords))
                 
-                # 6. HTML로 변환하여 표 표시 (unsafe_allow_html=True로 HTML 태그를 화면에 그리도록 함)
-                # to_html로 생성된 표는 기본 스타일이므로, st.dataframe과 모양이 다를 수 있습니다.
                 st.markdown(display_df.to_html(escape=False, index=False), unsafe_allow_html=True)
 
             else:
                 st.info(f'"{selected_product}" 상품에 대한 분석 가능한 핵심어가 없습니다. 원본 리뷰만 표시합니다.')
-                # 핵심어가 없으면 원본 리뷰 목록만 보여줌
                 st.dataframe(product_reviews[['평점', '리뷰내용']].sort_values(by='평점', ascending=True), use_container_width=True)
-        # --- [대대적 수정 부분 끝] ---
-
+        
         st.divider()
 
         # --- 5. 전체 핵심어 경향 분석 ---
