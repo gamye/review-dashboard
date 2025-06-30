@@ -61,12 +61,21 @@ def preprocess_text(text):
 
 def get_korean_font_path():
     """운영체제에 맞는 한글 글꼴 경로를 반환합니다."""
+    import os
     if platform.system() == 'Windows':
         return 'c:/Windows/Fonts/malgun.ttf'
     elif platform.system() == 'Darwin':
         return '/System/Library/Fonts/Supplemental/AppleGothic.ttf'
-    else: # 리눅스
-        return '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
+    else: # 리눅스 (Streamlit Cloud)
+        # 나눔고딕이 설치되어 있는지 확인 후 경로 반환
+        nanum_font_path = '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
+        if os.path.exists(nanum_font_path):
+            return nanum_font_path
+        else:
+            # 만약 나눔고딕이 없으면, 기본 글꼴을 사용하도록 None을 반환
+            # 이 경우 워드클라우드에 한글이 깨질 수 있으나, 앱 실행은 됨
+            st.warning("나눔고딕 글꼴을 찾을 수 없어 기본 글꼴로 표시됩니다. (한글 깨짐 가능성)")
+            return None
 
 FONT_PATH = get_korean_font_path()
 
